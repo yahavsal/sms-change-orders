@@ -1,9 +1,12 @@
 import os
+import re
+import json
 import logging
 import requests
 from flask import Flask, request
 from twilio.rest import Client as TwilioClient
 from twilio.twiml.messaging_response import MessagingResponse
+import anthropic
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -20,6 +23,7 @@ SUBS_TABLE = os.environ["SUBCONTRACTORS_TABLE_ID"]
 PROJECTS_TABLE = os.environ["PROJECTS_TABLE_ID"]
 
 SLACK_WEBHOOK = os.environ.get("SLACK_WEBHOOK_URL", "")
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 
 AIRTABLE_HEADERS = {
     "Authorization": f"Bearer {AIRTABLE_TOKEN}",
@@ -31,26 +35,105 @@ PROJECT_MAP = {
     "vessel club": "Vessel Club",
 }
 
+URGENCY_KEYWORDS = {"urgent", "asap", "emergency", "high", "rush", "critical", "now"}
+
 twilio_client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
 
 def airtable_url(table_id):
     return f"https://api.airtable.com/v0/{AIRTABLE_BASE}/{table_id}"
 
 
+def _normalize_project(raw):
+    """Map common project name variations to canonical names."""
+    return PROJECT_MAP.get(raw.strip().lower(), raw.strip())
+
+
+def _detect_urgency(text):
+    """Return 'Urgent' if any urgency keyword appears anywhere in the text."""
+    words = set(re.findall(r"\w+", text.lower()))
+    return "Urgent" if words & URGENCY_KEYWORDS else "Normal"
+
+
+def _parse_structured(body):
+    """
+    Try to split the message on common delimiters and extract 3-4 fields.
+    Accepts: ' - ', ' / ', ' | ', ',', or plain '-'.
+    Returns parsed dict or None if it can't find at least 3 fields.
+    """
+    for sep in [r"\s+-\s+", r"\s*/\s*", r"\s*\|\s*", r",\s*"]:
+        parts = [p.strip() for p in re.split(sep, body) if p.strip()]
+        if len(parts) >= 3:
+            project = _normalize_project(parts[0])
+            scope = parts[1]
+            sub_name = parts[2]
+            # Urgency can be the 4th field OR anywhere in the full message
+            urgency = _detect_urgency(parts[3] if len(parts) >= 4 else body)
+            return {"project": project, "scope": scope, "sub_name": sub_name, "urgency": urgency}
+    return None
+
+
+def _parse_with_ai(body):
+    """
+    Fall back to Claude Haiku to extract fields from free-form text.
+    Returns parsed dict or raises ValueError if extraction fails.
+    """
+    if not anthropic_client:
+        raise ValueError("Message format not recognized. Use: Project - Scope - Sub - Urgency")
+
+    known_projects = list(set(PROJECT_MAP.values()))
+    prompt = f"""Extract the four fields of a construction change order from this SMS message.
+
+SMS: "{body}"
+
+Known project names: {known_projects}
+
+Return ONLY a JSON object with exactly these keys:
+- "project": the job site / project name (match to a known project if possible, otherwise use what was written)
+- "scope": description of the extra work or change
+- "sub_name": the subcontractor company name
+- "urgency": either "Urgent" or "Normal"
+
+If a field is genuinely impossible to determine, set it to null.
+Return ONLY valid JSON, no explanation."""
+
+    response = anthropic_client.messages.create(
+        model="claude-haiku-4-5",
+        max_tokens=256,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw = response.content[0].text.strip()
+    # Strip markdown code fences if present
+    raw = re.sub(r"^```[a-z]*\n?", "", raw)
+    raw = re.sub(r"\n?```$", "", raw)
+
+    try:
+        result = json.loads(raw)
+    except json.JSONDecodeError:
+        raise ValueError("Could not understand your message. Use: Project - Scope - Sub - Urgency")
+
+    missing = [k for k in ("project", "scope", "sub_name") if not result.get(k)]
+    if missing:
+        raise ValueError(f"Could not identify {', '.join(missing)} in your message. Use: Project - Scope - Sub - Urgency")
+
+    result["urgency"] = result.get("urgency") or _detect_urgency(body)
+    result["project"] = _normalize_project(result["project"])
+    log.info("AI parser extracted: %s", result)
+    return result
+
+
 def parse_sms(body):
-    parts = [p.strip() for p in body.split(" - ")]
-    if len(parts) < 3:
-        raise ValueError("Invalid format. Use: Project - Scope - Sub - Urgency")
+    """
+    Two-stage parser: try structured split first, fall back to AI.
+    """
+    result = _parse_structured(body)
+    if result:
+        log.info("Structured parser matched: %s", result)
+        return result
 
-    project_key = parts[0].lower()
-    project = PROJECT_MAP.get(project_key, parts[0])
-    scope = parts[1]
-    sub_name = parts[2]
-    urgency_raw = parts[3].lower() if len(parts) >= 4 else "normal"
-    urgency = "Urgent" if urgency_raw in ("urgent", "high", "asap") else "Normal"
-
-    return {"project": project, "scope": scope, "sub_name": sub_name, "urgency": urgency}
+    log.info("Structured parse failed, trying AI fallback for: %s", body)
+    return _parse_with_ai(body)
 
 
 def find_or_create_sub(name):
