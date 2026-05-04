@@ -315,6 +315,7 @@ def create_notion_task(co_id, project, scope, sub_name):
                             }
                         ]
                     },
+                    "Source": {"select": {"name": "Email"}},
                 },
             },
             timeout=10,
