@@ -41,12 +41,164 @@ PROJECT_MAP = {
 
 URGENCY_KEYWORDS = {"urgent", "asap", "emergency", "high", "rush", "critical", "now"}
 
+# ---------------------------------------------------------------------------
+# Sub proposals: defines what each sub was contracted for on each project.
+# Used to flag COs that are in-scope (upcharge) vs. fully out of scope.
+# ---------------------------------------------------------------------------
+PROPOSALS = {
+    "Vessel Club": {
+        "precision electric": {
+            "display_name": "Precision Electric",
+            "total": 22069.25,
+            "scope": [
+                "new breakers for new equipment",
+                "new power installation per electrical plans (E1)",
+                "lighting package per electrical plans (E2), existing lighting to remain",
+                "occupancy controls",
+                "buck/boost transformer for sauna (0.75 KVA)",
+                "power connections to exhaust fans (units provided by HVAC)",
+            ],
+            "exclusions": [
+                "low voltage controls for heat pump and chiller",
+                "exhaust fan units (provided by HVAC contractor)",
+            ],
+        },
+        "johnson plumbing": {
+            "display_name": "Johnson Plumbing / Mr. Rooter",
+            "total": 33303.66,
+            "scope": [
+                "supply and install new drain waste and vent (DWV) system",
+                "new water lines",
+                "new gas line to water heater",
+                "supply and install plumbing fixtures per schedule",
+                "concrete cutting (280 sq ft)",
+                "run new 1-1/4 inch pex A line from meter room to leased space",
+            ],
+            "exclusions": [
+                "shower and shower components (deducted from proposal)",
+            ],
+        },
+        "mr. rooter": {  # alias
+            "display_name": "Johnson Plumbing / Mr. Rooter",
+            "total": 33303.66,
+            "scope": [
+                "supply and install new drain waste and vent (DWV) system",
+                "new water lines",
+                "new gas line to water heater",
+                "supply and install plumbing fixtures per schedule",
+                "concrete cutting (280 sq ft)",
+                "run new 1-1/4 inch pex A line from meter room to leased space",
+            ],
+            "exclusions": [
+                "shower and shower components (deducted from proposal)",
+            ],
+        },
+        "brick city painting": {
+            "display_name": "Brick City Painting & Drywall",
+            "total": 13011.40,
+            "scope": [
+                "ceiling painting: prime coat plus 2 coats flat latex",
+                "wall painting: prime coat plus 2 coats commercial eggshell latex",
+                "10 doors and frames: scuff sand prep plus 2 coats latex paint",
+                "sealed concrete flooring: diamond grind CSP 1-3 plus 2 coats sealer (budgeted option)",
+                "shower stall flooring: diamond grind CSP 1-3, vinyl chip system single broadcast, 4 inch epoxy cove",
+            ],
+            "exclusions": [
+                "epoxy flooring upgrade (not selected, would be $8,220 if added)",
+                "removal of pre-existing paint spatters from floors, hardware, or windows",
+            ],
+        },
+        "brick city": {  # alias
+            "display_name": "Brick City Painting & Drywall",
+            "total": 13011.40,
+            "scope": [
+                "ceiling painting: prime coat plus 2 coats flat latex",
+                "wall painting: prime coat plus 2 coats commercial eggshell latex",
+                "10 doors and frames: scuff sand prep plus 2 coats latex paint",
+                "sealed concrete flooring: diamond grind CSP 1-3 plus 2 coats sealer (budgeted option)",
+                "shower stall flooring: diamond grind CSP 1-3, vinyl chip system single broadcast, 4 inch epoxy cove",
+            ],
+            "exclusions": [
+                "epoxy flooring upgrade (not selected, would be $8,220 if added)",
+                "removal of pre-existing paint spatters from floors, hardware, or windows",
+            ],
+        },
+    }
+}
+
 twilio_client = TwilioClient(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
 
 def airtable_url(table_id):
     return f"https://api.airtable.com/v0/{AIRTABLE_BASE}/{table_id}"
+
+
+def analyze_co_vs_proposal(project, sub_name, scope):
+    """
+    Compare a CO's scope against the sub's original proposal to detect:
+      - 'in_scope_upcharge': item is covered by the proposal but sub wants more money
+      - 'out_of_scope': item is not in the proposal at all
+      - 'normal': looks like a legitimate change beyond original scope
+    Returns a dict: {flag, label, reasoning}  or None if AI unavailable / no proposal found.
+    """
+    if not anthropic_client:
+        return None
+
+    project_proposals = PROPOSALS.get(project, {})
+    proposal = project_proposals.get(sub_name.strip().lower())
+    if not proposal:
+        # Try partial match
+        for key, val in project_proposals.items():
+            if key in sub_name.strip().lower() or sub_name.strip().lower() in key:
+                proposal = val
+                break
+    if not proposal:
+        log.info("No proposal found for sub '%s' on project '%s', skipping CO analysis", sub_name, project)
+        return None
+
+    scope_list = "\n".join(f"  - {s}" for s in proposal["scope"])
+    excl_list = "\n".join(f"  - {e}" for e in proposal["exclusions"])
+
+    prompt = f"""You are a construction project manager reviewing a change order (CO) submitted by a subcontractor.
+
+PROJECT: {project}
+SUB: {proposal['display_name']} (original contract total: ${proposal['total']:,.2f})
+
+ORIGINAL CONTRACT SCOPE:
+{scope_list}
+
+EXPLICITLY EXCLUDED FROM CONTRACT:
+{excl_list}
+
+NEW CHANGE ORDER DESCRIPTION:
+"{scope}"
+
+Classify this CO into exactly one of these categories:
+1. "in_scope_upcharge" - The work described is already covered by the original contract scope, meaning the sub is trying to charge extra for something they were already paid for.
+2. "out_of_scope" - The work is completely outside what this sub was contracted to do (different trade, different area, not related).
+3. "normal" - The work is a legitimate change: genuinely new scope beyond the contract, unforeseen conditions, or owner-directed changes.
+
+Respond with ONLY a JSON object with exactly these keys:
+- "flag": one of "in_scope_upcharge", "out_of_scope", or "normal"
+- "label": a short 4-6 word label for the flag (e.g. "Already in contract scope" or "Outside trade scope")
+- "reasoning": one concise sentence explaining why"""
+
+    try:
+        response = anthropic_client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=300,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = response.content[0].text.strip()
+        raw = re.sub(r"^```[a-z]*\n?", "", raw)
+        raw = re.sub(r"\n?```$", "", raw)
+        result = json.loads(raw)
+        log.info("CO analysis for '%s': %s", scope, result)
+        return result
+    except Exception as e:
+        log.error("CO analysis failed: %s", e)
+        return None
 
 
 def _normalize_project(raw):
@@ -196,55 +348,70 @@ def alert_slack(text):
         log.error("Slack alert failed: %s", e)
 
 
-def post_co_to_slack(co_id, project, scope, sub_name, urgency, sender_phone):
-    """Post an interactive CO notification to #construction with Approve/Deny/Review buttons."""
+def post_co_to_slack(co_id, project, scope, sub_name, urgency, sender_phone, analysis=None):
+    """Post an interactive CO notification to #construction with Approve/Deny/Review buttons.
+    Optional analysis dict: {flag, label, reasoning} from analyze_co_vs_proposal().
+    """
     if not SLACK_BOT_TOKEN:
-        alert_slack(f"New CO logged: {project} - {scope} ({sub_name}) [{urgency}]")
+        flag_note = ""
+        if analysis and analysis.get("flag") != "normal":
+            flag_note = f" ⚠️ [{analysis['label']}]"
+        alert_slack(f"New CO logged: {project} - {scope} ({sub_name}) [{urgency}]{flag_note}")
         return
 
     urgency_emoji = "🚨" if urgency == "Urgent" else "📋"
     value = f"{co_id}|{sender_phone}"
 
+    # Build the main CO text
+    main_text = (
+        f"{urgency_emoji} *New Change Order*\n"
+        f"*Project:* {project}\n"
+        f"*Scope:* {scope}\n"
+        f"*Sub:* {sub_name}\n"
+        f"*Urgency:* {urgency}"
+    )
+
     blocks = [
         {
             "type": "section",
-            "text": {
-                "type": "mrkdwn",
-                "text": (
-                    f"{urgency_emoji} *New Change Order*\n"
-                    f"*Project:* {project}\n"
-                    f"*Scope:* {scope}\n"
-                    f"*Sub:* {sub_name}\n"
-                    f"*Urgency:* {urgency}"
-                ),
-            },
-        },
-        {
-            "type": "actions",
-            "elements": [
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "✅ Approve"},
-                    "action_id": "co_approve",
-                    "value": value,
-                    "style": "primary",
-                },
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "❌ Deny"},
-                    "action_id": "co_deny",
-                    "value": value,
-                    "style": "danger",
-                },
-                {
-                    "type": "button",
-                    "text": {"type": "plain_text", "text": "🔍 Needs Review"},
-                    "action_id": "co_review",
-                    "value": value,
-                },
-            ],
+            "text": {"type": "mrkdwn", "text": main_text},
         },
     ]
+
+    # Add a flag context block if AI flagged something suspicious
+    if analysis and analysis.get("flag") in ("in_scope_upcharge", "out_of_scope"):
+        flag_emoji = "🔴" if analysis["flag"] == "out_of_scope" else "🟡"
+        flag_text = f"{flag_emoji} *Scope Flag:* {analysis['label']}\n_{analysis['reasoning']}_"
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": flag_text},
+        })
+
+    blocks.append({
+        "type": "actions",
+        "elements": [
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "✅ Approve"},
+                "action_id": "co_approve",
+                "value": value,
+                "style": "primary",
+            },
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "❌ Deny"},
+                "action_id": "co_deny",
+                "value": value,
+                "style": "danger",
+            },
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": "🔍 Needs Review"},
+                "action_id": "co_review",
+                "value": value,
+            },
+        ],
+    })
 
     try:
         resp = requests.post(
@@ -351,6 +518,8 @@ def sms_webhook():
         short_id = co_id[-6:].upper()
         reply = f"✅ CO-{short_id} logged. Quote request sent to {parsed['sub_name']}."
         send_sms(sender, reply)
+        # Analyze CO scope against original proposal (non-blocking — failure is logged, not raised)
+        analysis = analyze_co_vs_proposal(parsed["project"], parsed["sub_name"], parsed["scope"])
         post_co_to_slack(
             co_id,
             parsed["project"],
@@ -358,6 +527,7 @@ def sms_webhook():
             parsed["sub_name"],
             parsed["urgency"],
             sender,
+            analysis=analysis,
         )
         log.info("Change order created: %s", co_id)
 
