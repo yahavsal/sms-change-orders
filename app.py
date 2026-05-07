@@ -95,30 +95,26 @@ PROPOSALS = {
         },
         "brick city painting": {
             "display_name": "Brick City Painting & Drywall",
-            "total": 13011.40,
+            "total": 6590.00,
             "scope": [
-                "ceiling painting: prime coat plus 2 coats flat latex",
-                "wall painting: prime coat plus 2 coats commercial eggshell latex",
-                "10 doors and frames: scuff sand prep plus 2 coats latex paint",
-                "sealed concrete flooring: diamond grind CSP 1-3 plus 2 coats sealer (budgeted option)",
+                "sealed concrete flooring: diamond grind CSP 1-3 plus 2 coats sealer",
                 "shower stall flooring: diamond grind CSP 1-3, vinyl chip system single broadcast, 4 inch epoxy cove",
             ],
             "exclusions": [
+                "painting (removed from scope — ceilings, walls, doors not contracted)",
                 "epoxy flooring upgrade (not selected, would be $8,220 if added)",
                 "removal of pre-existing paint spatters from floors, hardware, or windows",
             ],
         },
         "brick city": {  # alias
             "display_name": "Brick City Painting & Drywall",
-            "total": 13011.40,
+            "total": 6590.00,
             "scope": [
-                "ceiling painting: prime coat plus 2 coats flat latex",
-                "wall painting: prime coat plus 2 coats commercial eggshell latex",
-                "10 doors and frames: scuff sand prep plus 2 coats latex paint",
-                "sealed concrete flooring: diamond grind CSP 1-3 plus 2 coats sealer (budgeted option)",
+                "sealed concrete flooring: diamond grind CSP 1-3 plus 2 coats sealer",
                 "shower stall flooring: diamond grind CSP 1-3, vinyl chip system single broadcast, 4 inch epoxy cove",
             ],
             "exclusions": [
+                "painting (removed from scope — ceilings, walls, doors not contracted)",
                 "epoxy flooring upgrade (not selected, would be $8,220 if added)",
                 "removal of pre-existing paint spatters from floors, hardware, or windows",
             ],
