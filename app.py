@@ -497,6 +497,69 @@ def health():
     return "OK"
 
 
+@app.route("/consent")
+def consent():
+    """Public opt-in page for toll-free verification."""
+    html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SMS Consent - Grove Construction</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 20px; color: #222; }
+    h1 { font-size: 22px; border-bottom: 2px solid #222; padding-bottom: 10px; }
+    h2 { font-size: 16px; margin-top: 28px; }
+    p, li { font-size: 14px; line-height: 1.6; }
+    .box { background: #f4f4f4; border-left: 4px solid #222; padding: 14px 18px; margin: 24px 0; border-radius: 2px; }
+    footer { margin-top: 40px; font-size: 12px; color: #888; border-top: 1px solid #ddd; padding-top: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Grove Construction &mdash; SMS Notifications</h1>
+
+  <p>Grove Construction uses SMS to manage construction change orders with subcontractors on active job sites.</p>
+
+  <h2>What messages you will receive</h2>
+  <ul>
+    <li>Confirmation that your change order was received and logged</li>
+    <li>Approval or denial status of your submitted change order</li>
+    <li>Follow-up requests if additional information is needed</li>
+  </ul>
+  <p>These are operational account notifications only. No marketing messages will be sent.</p>
+
+  <h2>How to opt in</h2>
+  <div class="box">
+    <p>Subcontractors are informed of the SMS number at project kickoff by a Grove Construction project manager. To opt in, text your change order details to:</p>
+    <p><strong>(888) 309-5898</strong></p>
+    <p>By texting this number, you consent to receive SMS messages related to your change orders from Grove Construction.</p>
+  </div>
+
+  <h2>Verbal opt-in script</h2>
+  <div class="box">
+    <p><strong>Grove Construction PM:</strong> &ldquo;As part of our change order process, we use SMS to log and track requests. If you text your change order details to (888) 309-5898, you&rsquo;ll get a confirmation right away and a follow-up once it&rsquo;s been reviewed. Message and data rates may apply. You can reply STOP at any time to opt out, or HELP for assistance. Do you agree to receive these messages?&rdquo;</p>
+    <p><strong>Subcontractor:</strong> &ldquo;Yes.&rdquo;</p>
+    <p><strong>Grove Construction PM:</strong> &ldquo;Great &mdash; you&rsquo;re all set. Text your first change order whenever you&rsquo;re ready.&rdquo;</p>
+  </div>
+
+  <h2>Message frequency</h2>
+  <p>Message frequency varies based on change order activity. Typically 1&ndash;3 messages per change order submitted.</p>
+
+  <h2>Opt out &amp; help</h2>
+  <ul>
+    <li>Reply <strong>STOP</strong> to unsubscribe from all messages at any time.</li>
+    <li>Reply <strong>HELP</strong> for assistance or contact <a href="mailto:yahav@vessel.community">yahav@vessel.community</a>.</li>
+  </ul>
+
+  <h2>Privacy</h2>
+  <p>Your phone number and message content are used solely to process change orders. We do not sell or share your information with third parties for marketing purposes.</p>
+
+  <footer>Grove Construction &bull; (888) 309-5898 &bull; yahav@vessel.community</footer>
+</body>
+</html>"""
+    return html, 200, {"Content-Type": "text/html"}
+
+
 @app.route("/sms", methods=["POST"])
 def sms_webhook():
     sender = request.form.get("From", "")
